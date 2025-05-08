@@ -21,7 +21,7 @@ namespace MiniECS.Systems
                 var p = em.GetComponent<PositionECS>(e);
                 var v = em.GetComponent<VelocityECS>(e);
                 p.X += v.VX * dt;
-                p.Y += v.VY * dt;
+                p.Z += v.VZ * dt;
                 em.AddComponent(e, p);
             }
         }
@@ -49,18 +49,50 @@ namespace MiniECS.Systems
 
     public class BulletDestroySystemECS : ISystem
     {
+        // reuse buffer
+        readonly List<int> buffer = new List<int>();
+
         public void Update(EntityManager em, float dt)
         {
-            var ents = new List<int>();
+            buffer.Clear();
             foreach (var e in em.Query(typeof(BulletTagECS), typeof(PositionECS)))
-                ents.Add(e);
+                buffer.Add(e);
 
-            foreach (var e in ents)
+            for (int i = 0, c = buffer.Count; i < c; i++)
+                em.DestroyEntityDeferred(buffer[i]);
+        }
+    }
+
+    public class CleanupSystemECS : ISystem
+    {
+        const float Limit = 50f;
+        // reuse buffer mỗi frame
+        readonly List<int> buffer = new List<int>();
+
+        public void Update(EntityManager em, float dt)
+        {
+            buffer.Clear();
+            // lấy hết entity có Position để test khoảng cách
+            foreach (var e in em.Query(typeof(PositionECS)))
+                buffer.Add(e);
+
+            for (int i = 0, c = buffer.Count; i < c; i++)
             {
+                int e = buffer[i];
                 var p = em.GetComponent<PositionECS>(e);
-                UnityEngine.Debug.Log($"→ Bullet at ({p.X:0.00},{p.Y:0.00}) destroyed.");
-                em.DestroyEntity(e);
+                if (Mathf.Abs(p.X) > Limit || Mathf.Abs(p.Z) > Limit)
+                {
+                    em.DestroyEntityDeferred(e);
+                }
             }
+        }
+    }
+
+    public class FlushSystemECS : ISystem
+    {
+        public void Update(EntityManager em, float dt)
+        {
+            em.FlushDestructions();
         }
     }
 
@@ -84,23 +116,27 @@ namespace MiniECS.Systems
                 var meshComp = em.GetComponent<MeshECS>(e);
                 var matComp = em.GetComponent<MaterialECS>(e);
                 var key = (meshComp.Mesh, matComp.Mat);
+
                 if (!batches.TryGetValue(key, out var mats))
                 {
                     mats = new List<Matrix4x4>();
                     batches[key] = mats;
                 }
-                Vector3 pos = new Vector3(p.X, 0f, p.Y);
+
+                Vector3 pos = new Vector3(p.X, 0f, p.Z);
                 mats.Add(Matrix4x4.TRS(pos, Quaternion.identity, Vector3.one * 0.1f));
             }
 
             // Draw each batch once
             foreach (var kv in batches)
             {
-                var mesh = kv.Key.mesh;
-                var mat = kv.Key.mat;
+                var mesh = kv.Key.Item1;    // <-- đây
+                var mat = kv.Key.Item2;    // <-- và đây
                 var mats = kv.Value;
+
                 if (!mat.enableInstancing)
                     mat.enableInstancing = true;
+
                 Graphics.DrawMeshInstanced(mesh, 0, mat, mats);
             }
         }

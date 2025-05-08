@@ -9,45 +9,51 @@ public class ECSBootstrap : MonoBehaviour
 {
     [Header("Demo Settings")]
     [SerializeField] int SpawnCount = 5000;
-    [SerializeField] float Spread     = 20f;
-    [SerializeField] float Speed      = 5f;
-    [SerializeField] float Lifetime   = 10f;
+    [SerializeField] float Spread = 20f;
+    [SerializeField] float Speed = 5f;
+    [SerializeField] float Lifetime = 10f;
     [Header("Render Settings")]
-    [SerializeField] Mesh    BulletMesh;
+    [SerializeField] Mesh BulletMesh;
     [SerializeField] Material BulletMaterial;
 
     EntityManager em;
     List<ISystem> systems;
 
-    void OnEnable()
+    ISystem renderSystem;
+
+    void Start()
     {
         em = new EntityManager();
         systems = new List<ISystem>
         {
             new MovementSystemECS(),
-            new LifetimeSystemECS(),
-            new BulletDestroySystemECS(),
-            new RenderSystemECS()
+            new CleanupSystemECS(),      // ← xóa theo khoảng cách trước
+            new LifetimeSystemECS(),     // ← đánh dấu hết life → add BulletTagECS
+            new BulletDestroySystemECS(),// ← chỉ destroy deferred
         };
 
+        renderSystem = new RenderSystemECS();
+
+        BulletEntityECS.Initialize(em, BulletMesh, BulletMaterial);
+    }
+
+    public void Spawn()
+    {
         for (int i = 0; i < SpawnCount; i++)
         {
-            var e = em.CreateEntity();
-            float x = Random.Range(-Spread, Spread);
-            float y = Random.Range(-Spread, Spread);
-            em.AddComponent(e, new PositionECS { X = x, Y = y });
+            var pos = new Vector3(
+                Random.Range(-Spread, Spread),
+                0f,
+                Random.Range(-Spread, Spread)
+            );
 
-            var dir = new Vector2(
+            var dir = new Vector3(
                 Random.Range(-1f, 1f),
+                0f,
                 Random.Range(-1f, 1f)
             ).normalized;
-            em.AddComponent(e, new VelocityECS { VX = dir.x * Speed, VY = dir.y * Speed });
 
-            em.AddComponent(e, new LifetimeECS { Remaining = Lifetime });
-
-            // assign mesh & material
-            em.AddComponent(e, new MeshECS { Mesh = BulletMesh });
-            em.AddComponent(e, new MaterialECS { Mat = BulletMaterial });
+            BulletEntityECS.Spawn(pos, dir, Speed, Lifetime);
         }
     }
 
@@ -56,5 +62,8 @@ public class ECSBootstrap : MonoBehaviour
         float dt = Time.deltaTime;
         foreach (var sys in systems)
             sys.Update(em, dt);
+
+        em.FlushDestructions();
+        renderSystem.Update(em, dt);
     }
 }
